@@ -1,0 +1,7 @@
+Write a one-line Slack alert (max 200 characters) flagging this urgent email to a busy professional. Include sender name, category, and the core ask. No emojis except one 🚨 at the start. Be direct.
+
+Format:
+🚨 [Sender Name] ([Category]): [Core ask in 10 words or fewer] — action required.
+
+Example:
+🚨 Sarah Chen (Job): Interview scheduled for tomorrow at 10am — confirm attendance.

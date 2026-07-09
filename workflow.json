@@ -1,0 +1,387 @@
+{
+  "name": "AI Email Auto-Reply Assistant",
+  "nodes": [
+    {
+      "id": "node_1",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute" }]
+        },
+        "filters": {
+          "includeSpam": false,
+          "includeTrash": false
+        }
+      }
+    },
+    {
+      "id": "node_2",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [300, 300],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "subject", "value": "={{ $json.subject ?? '' }}" },
+            { "name": "from", "value": "={{ $json.from ?? '' }}" },
+            { "name": "body", "value": "={{ $json.text ?? $json.snippet ?? '' }}" },
+            { "name": "date", "value": "={{ $json.date ?? $now.toISO() }}" },
+            { "name": "threadId", "value": "={{ $json.threadId ?? '' }}" },
+            { "name": "messageId", "value": "={{ $json.id ?? '' }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_3",
+      "name": "PROCESS or IGNORE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LLM_API_URL }}/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $env.LLM_MODEL }}\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Decide if this email requires human attention or should be silently ignored (spam, marketing, automated no-reply notifications, or newsletters).\\n\\nReturn ONLY one word: PROCESS or IGNORE.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Subject: {{ $json.subject }}\\nFrom: {{ $json.from }}\\nBody preview: {{ $json.body.slice(0, 400) }}\"\n    }\n  ],\n  \"max_tokens\": 10,\n  \"temperature\": 0\n}"
+      }
+    },
+    {
+      "id": "node_4",
+      "name": "Should Process?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.choices[0].message.content.trim().toUpperCase() }}",
+              "operation": "equal",
+              "value2": "PROCESS"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_5",
+      "name": "Ignore Email",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [940, 460],
+      "parameters": {}
+    },
+    {
+      "id": "node_6",
+      "name": "AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 220],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LLM_API_URL }}/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $env.LLM_MODEL }}\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an AI email triage assistant for a professional inbox. Analyze the email below and classify it precisely.\\n\\nINSTRUCTIONS:\\n1. Read the subject, sender, and body carefully.\\n2. Determine the single best-fitting category from this exact list:\\n   - Job (recruiting, interviews, offers, applications)\\n   - Client (existing client communication, project updates, invoices)\\n   - Support (help requests, bug reports, technical issues)\\n   - Meeting (scheduling, calendar invites, reschedule requests)\\n   - Spam (unsolicited sales, phishing, irrelevant mass mail)\\n   - Personal (friends, family, non-work)\\n   - Newsletter (subscriptions, digests, marketing updates)\\n3. Determine priority:\\n   - Urgent: needs action within hours\\n   - High: needs action within 1-2 days\\n   - Medium: needs action within the week\\n   - Low: no real deadline, informational only\\n4. Determine shouldReply: true only if a human reply is genuinely expected.\\n5. Write a one-sentence summary in plain English (max 25 words).\\n6. Identify the sender's core intent in a few words.\\n\\nReturn ONLY valid JSON, no markdown, no code fences:\\n{\\\"category\\\":\\\"\\\",\\\"priority\\\":\\\"\\\",\\\"summary\\\":\\\"\\\",\\\"intent\\\":\\\"\\\",\\\"shouldReply\\\":true}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Subject: {{ $('Set Variables').item.json.subject }}\\nFrom: {{ $('Set Variables').item.json.from }}\\nBody:\\n{{ $('Set Variables').item.json.body }}\"\n    }\n  ],\n  \"temperature\": 0.2\n}"
+      }
+    },
+    {
+      "id": "node_7",
+      "name": "Extract Triage JSON",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1160, 220],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "subject",    "value": "={{ $('Set Variables').item.json.subject }}" },
+            { "name": "from",       "value": "={{ $('Set Variables').item.json.from }}" },
+            { "name": "body",       "value": "={{ $('Set Variables').item.json.body }}" },
+            { "name": "date",       "value": "={{ $('Set Variables').item.json.date }}" },
+            { "name": "threadId",   "value": "={{ $('Set Variables').item.json.threadId }}" },
+            { "name": "messageId",  "value": "={{ $('Set Variables').item.json.messageId }}" },
+            { "name": "category",   "value": "={{ JSON.parse($json.choices[0].message.content).category }}" },
+            { "name": "priority",   "value": "={{ JSON.parse($json.choices[0].message.content).priority }}" },
+            { "name": "summary",    "value": "={{ JSON.parse($json.choices[0].message.content).summary }}" },
+            { "name": "intent",     "value": "={{ JSON.parse($json.choices[0].message.content).intent }}" },
+            { "name": "shouldReply","value": "={{ JSON.parse($json.choices[0].message.content).shouldReply }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_8",
+      "name": "Should Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1380, 220],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldReply }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_9",
+      "name": "Generate Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LLM_API_URL }}/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $env.LLM_MODEL }}\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a professional email assistant writing on behalf of Haseeb Zahid. Draft a reply to the email below.\\n\\nTONE & STYLE RULES:\\n- Professional, warm, and concise — no more than 120 words.\\n- Match formality to the category: Job/Client emails = formal; Support = clear and reassuring; Meeting = efficient and action-oriented; Personal = friendly but still polished.\\n- No emojis, no slang, no filler phrases like 'I hope this email finds you well.'\\n- Always open with a proper greeting using the sender's first name if known, otherwise 'Hello.'\\n- Always close with 'Best regards,' followed by a new line and 'Haseeb Zahid.'\\n- If the email requests a meeting, propose checking availability rather than confirming a specific time.\\n- If the email is a support/bug report, acknowledge the issue, confirm it's being looked into, and avoid over-promising a fix timeline.\\n- Do not invent facts, commitments, dates, or figures not present in the original email.\\n\\nWrite only the reply text — no subject line, no explanation.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Sender: {{ $json.from }}\\nCategory: {{ $json.category }}\\nPriority: {{ $json.priority }}\\nDetected Intent: {{ $json.intent }}\\n\\nORIGINAL EMAIL:\\n{{ $json.body }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 300\n}"
+      }
+    },
+    {
+      "id": "node_10",
+      "name": "Extract Reply Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1820, 120],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "subject",    "value": "={{ $('Extract Triage JSON').item.json.subject }}" },
+            { "name": "from",       "value": "={{ $('Extract Triage JSON').item.json.from }}" },
+            { "name": "body",       "value": "={{ $('Extract Triage JSON').item.json.body }}" },
+            { "name": "date",       "value": "={{ $('Extract Triage JSON').item.json.date }}" },
+            { "name": "category",   "value": "={{ $('Extract Triage JSON').item.json.category }}" },
+            { "name": "priority",   "value": "={{ $('Extract Triage JSON').item.json.priority }}" },
+            { "name": "summary",    "value": "={{ $('Extract Triage JSON').item.json.summary }}" },
+            { "name": "intent",     "value": "={{ $('Extract Triage JSON').item.json.intent }}" },
+            { "name": "replyText",  "value": "={{ $json.choices[0].message.content.trim() }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_11",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2040, 120],
+      "parameters": {
+        "operation": "create",
+        "resource": "draft",
+        "message": {
+          "to": "={{ $json.from }}",
+          "subject": "=Re: {{ $json.subject }}",
+          "message": "={{ $json.replyText }}",
+          "threadId": "={{ $('Set Variables').item.json.threadId }}"
+        }
+      }
+    },
+    {
+      "id": "node_12",
+      "name": "Is Urgent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1600, 340],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.priority }}",
+              "operation": "equal",
+              "value2": "Urgent"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_13",
+      "name": "Build Slack Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1820, 260],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "slackMessage",
+              "value": "=🚨 {{ $json.from.split('<')[0].trim() }} ({{ $json.category }}): {{ $json.summary }} — Reply needed urgently."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node_14",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2040, 260],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{ $env.SLACK_CHANNEL }}",
+        "text": "={{ $json.slackMessage }}"
+      }
+    },
+    {
+      "id": "node_15",
+      "name": "Skip Reply",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1600, 460],
+      "parameters": {}
+    },
+    {
+      "id": "node_16",
+      "name": "Merge for Log",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [2260, 300],
+      "parameters": {
+        "mode": "passThrough",
+        "output": "input1"
+      }
+    },
+    {
+      "id": "node_17",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [2480, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "sheetName": "EmailLog",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date":            "={{ $('Extract Triage JSON').item.json.date ?? $('Set Variables').item.json.date }}",
+            "Sender":          "={{ $('Extract Triage JSON').item.json.from }}",
+            "Subject":         "={{ $('Extract Triage JSON').item.json.subject }}",
+            "Category":        "={{ $('Extract Triage JSON').item.json.category }}",
+            "Priority":        "={{ $('Extract Triage JSON').item.json.priority }}",
+            "Summary":         "={{ $('Extract Triage JSON').item.json.summary }}",
+            "Intent":          "={{ $('Extract Triage JSON').item.json.intent }}",
+            "ReplyGenerated":  "={{ $('Extract Triage JSON').item.json.shouldReply }}",
+            "LoggedAt":        "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "node_18",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [2480, 500],
+      "parameters": {}
+    },
+    {
+      "id": "node_19",
+      "name": "Notify on Error",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2700, 500],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{ $env.SLACK_CHANNEL }}",
+        "text": "=⚠️ AI Email Assistant error in node *{{ $json.execution.lastNodeExecuted }}*: {{ $json.execution.error.message }}"
+      }
+    },
+    {
+      "id": "node_20",
+      "name": "Installation Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2700, 300],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Set Variables", "type": "main", "index": 0 }]]
+    },
+    "Set Variables": {
+      "main": [[{ "node": "PROCESS or IGNORE", "type": "main", "index": 0 }]]
+    },
+    "PROCESS or IGNORE": {
+      "main": [[{ "node": "Should Process?", "type": "main", "index": 0 }]]
+    },
+    "Should Process?": {
+      "main": [
+        [{ "node": "AI Triage", "type": "main", "index": 0 }],
+        [{ "node": "Ignore Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Triage": {
+      "main": [[{ "node": "Extract Triage JSON", "type": "main", "index": 0 }]]
+    },
+    "Extract Triage JSON": {
+      "main": [[{ "node": "Should Reply?", "type": "main", "index": 0 }]]
+    },
+    "Should Reply?": {
+      "main": [
+        [{ "node": "Generate Reply", "type": "main", "index": 0 }],
+        [{ "node": "Is Urgent?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Reply": {
+      "main": [[{ "node": "Extract Reply Text", "type": "main", "index": 0 }]]
+    },
+    "Extract Reply Text": {
+      "main": [[{ "node": "Create Gmail Draft", "type": "main", "index": 0 }]]
+    },
+    "Create Gmail Draft": {
+      "main": [[{ "node": "Merge for Log", "type": "main", "index": 0 }]]
+    },
+    "Is Urgent?": {
+      "main": [
+        [{ "node": "Build Slack Alert", "type": "main", "index": 0 }],
+        [{ "node": "Skip Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Slack Alert": {
+      "main": [[{ "node": "Send Slack Alert", "type": "main", "index": 0 }]]
+    },
+    "Send Slack Alert": {
+      "main": [[{ "node": "Merge for Log", "type": "main", "index": 1 }]]
+    },
+    "Skip Reply": {
+      "main": [[{ "node": "Merge for Log", "type": "main", "index": 1 }]]
+    },
+    "Merge for Log": {
+      "main": [[{ "node": "Log to Google Sheets", "type": "main", "index": 0 }]]
+    },
+    "Log to Google Sheets": {
+      "main": [[{ "node": "Installation Complete", "type": "main", "index": 0 }]]
+    },
+    "Error Handler": {
+      "main": [[{ "node": "Notify on Error", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "errorWorkflow": "",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  },
+  "versionId": "2"
+}

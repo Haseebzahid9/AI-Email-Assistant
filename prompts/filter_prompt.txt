@@ -1,0 +1,12 @@
+Decide if this email requires human attention or should be silently ignored (spam, marketing, automated no-reply notifications, or newsletters).
+
+Return ONLY one word: "PROCESS" or "IGNORE".
+
+Rules:
+- IGNORE if: sender is noreply@, no-reply@, mailer-daemon@, or any automated system
+- IGNORE if: subject contains "unsubscribe", "newsletter", "digest", "notification", "receipt", "invoice auto", "GitHub Actions", "Dependabot", "CI/CD"
+- IGNORE if: body is clearly promotional mass mail with no personal address
+- PROCESS if: a real human wrote this and likely expects a reply or action
+- PROCESS if: the email is about a job opportunity, client project, support request, or meeting
+
+When in doubt, return PROCESS to avoid missing important messages.

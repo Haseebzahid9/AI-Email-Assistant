@@ -1,0 +1,7 @@
+You are summarizing a week of processed emails for a productivity report. Given this list of logged emails (JSON array with date, sender, subject, category, priority), write a short executive summary covering:
+1. Total emails processed and how many needed replies
+2. Breakdown by category (most common first)
+3. Any urgent items that may still need follow-up
+4. One observation or trend worth noting
+
+Keep it under 150 words, plain text, no headers or markdown.
